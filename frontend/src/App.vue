@@ -12,7 +12,7 @@
       placeholder="Search history"
     />
     <ul>
-      <li v-for="msg in history" :key="msg.id">{{ msg.text }}</li>
+      <li v-for="msg in history" :key="msg.id">{{ msg.content }}</li>
     </ul>
   </div>
 </template>
@@ -32,11 +32,14 @@ export default {
   methods: {
     async sendMessage() {
       try {
-        const res = await axios.post("http://localhost:8000/chat", {
+        const res = await axios.post("http://localhost:3000/message", {
           message: this.message,
         });
-        this.response = res.data.response;
-        this.history.push({ id: res.data.id, text: res.data.response });
+        this.response = `Message sent with ID: ${res.data.transactionId}`;
+        this.history.push({
+          id: res.data.transactionId,
+          content: this.message,
+        });
         this.message = "";
       } catch (error) {
         console.error("Error sending message:", error);
@@ -46,9 +49,11 @@ export default {
     async searchHistory() {
       try {
         const res = await axios.get(
-          `http://localhost:8000/search?query=${this.searchQuery}`
+          `http://localhost:3000/search?query=${encodeURIComponent(
+            this.searchQuery
+          )}`
         );
-        this.history = res.data.messages;
+        this.history = res.data.messages || [];
       } catch (error) {
         console.error("Error searching history:", error);
         this.history = [];
