@@ -5,11 +5,10 @@ const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
 const axios = require("axios");
 
-require("dotenv").config(); // Load environment variables from .env file
+require("dotenv").config();
 
 const db = new sqlite3.Database("./chat.db");
 
-// Create table with 'type' column
 db.serialize(() => {
   db.run(
     "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, content TEXT, type TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)"
@@ -26,11 +25,9 @@ app.use(
   })
 );
 
-app.use(express.json()); // Parse JSON bodies
+app.use(express.json());
 
-// Helper function to call OpenAI API
 async function getAIResponse(prompt) {
-  const axios = require('axios');
   try {
     const response = await axios.post(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -58,44 +55,72 @@ app.post("/message", async (req, res) => {
     return res.status(400).json({ error: "Message is required" });
   }
   try {
-    // Submit message to Hedera (your existing code)
-    const transaction = new TopicMessageSubmitTransaction()
+    console.log("Submitting user's prompt to Hedera...");
+    const promptTransaction = new TopicMessageSubmitTransaction()
       .setTopicId(process.env.HEDERA_TOPIC_ID)
       .setMessage(message);
-    const response = await transaction.execute(client);
-    const transactionId = response.transactionId.toString();
+    const promptResponse = await promptTransaction.execute(client);
+    const promptReceipt = await promptResponse.getReceipt(client);
+    const promptTransactionId = promptResponse.transactionId.toString();
+    console.log("User prompt transaction ID:", promptTransactionId);
+    console.log("User prompt transaction status:", promptReceipt.status.toString());
 
-    // Call Groq API using getAIResponse
+    console.log("Fetching AI response from Groq...");
     const llmResponse = await getAIResponse(message);
+    console.log("AI response received:", llmResponse);
 
-    // Store user message and AI response in database (your existing code)
-    db.run(
-      "INSERT INTO messages (id, content, type) VALUES (?, ?, ?)",
-      [transactionId, message, "user"],
-      (err) => {
-        if (err) {
-          console.error("Database insertion error (user message):", err.message);
-          return res.status(500).json({ error: "Failed to store user message" });
-        }
-        db.run(
-          "INSERT INTO messages (id, content, type) VALUES (?, ?, ?)",
-          [transactionId + "-response", llmResponse, "llm"],
-          (err) => {
-            if (err) {
-              console.error("Database insertion error (LLM response):", err.message);
-              return res.status(500).json({ error: "Failed to store LLM response" });
-            }
-            res.json({ transactionId });
+    console.log("Submitting AI response to Hedera...");
+    const responseTransaction = new TopicMessageSubmitTransaction()
+      .setTopicId(process.env.HEDERA_TOPIC_ID)
+      .setMessage(llmResponse);
+    const responseResponse = await responseTransaction.execute(client);
+    const responseReceipt = await responseResponse.getReceipt(client);
+    const responseTransactionId = responseResponse.transactionId.toString();
+    console.log("AI response transaction ID:", responseTransactionId);
+    console.log("AI response transaction status:", responseReceipt.status.toString());
+
+    console.log("Storing user message in database...");
+    await new Promise((resolve, reject) => {
+      db.run(
+        "INSERT INTO messages (id, content, type) VALUES (?, ?, ?)",
+        [promptTransactionId, message, "user"],
+        (err) => {
+          if (err) {
+            console.error("Database insertion error (user message):", err.message);
+            reject(err);
+          } else {
+            console.log("User message stored in database.");
+            resolve();
           }
-        );
-      }
-    );
+        }
+      );
+    });
+
+    console.log("Storing AI response in database...");
+    await new Promise((resolve, reject) => {
+      db.run(
+        "INSERT INTO messages (id, content, type) VALUES (?, ?, ?)",
+        [responseTransactionId, llmResponse, "llm"],
+        (err) => {
+          if (err) {
+            console.error("Database insertion error (AI response):", err.message);
+            reject(err);
+          } else {
+            console.log("AI response stored in database.");
+            resolve();
+          }
+        }
+      );
+    });
+
+    res.json({ transactionId: promptTransactionId });
   } catch (error) {
     console.error("Error in /message endpoint:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
+// Keep the rest of your code (e.g., /search, /api/chat, app.listen) unchanged
 app.get("/search", (req, res) => {
   const { query } = req.query;
   let sql = "SELECT id, content, type FROM messages ORDER BY timestamp ASC";
