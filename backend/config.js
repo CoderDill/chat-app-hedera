@@ -10,8 +10,8 @@ if (!accountId || !privateKeyStr) {
   throw new Error('Hedera credentials must be set in .env');
 }
 
-// Parse the private key using PrivateKey
-const privateKey = PrivateKey.fromString(privateKeyStr);
+const privateKey = PrivateKey.fromString(process.env.HEDERA_PRIVATE_KEY);
+client.setOperator(process.env.HEDERA_ACCOUNT_ID, privateKey);
 
 // Set the operator
 client.setOperator(accountId, privateKey);
